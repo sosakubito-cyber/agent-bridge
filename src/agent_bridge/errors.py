@@ -1,4 +1,5 @@
-"""BridgeError hierarchy. Every error renders to an MCP isError tool result."""
+"""BridgeError hierarchy. Every error renders to an MCP isError tool result
+(see server.py's _call_tool, which sets CallToolResult.isError=True directly)."""
 
 from __future__ import annotations
 
@@ -9,9 +10,6 @@ class BridgeError(Exception):
     def __init__(self, message: str):
         super().__init__(message)
         self.message = message
-
-    def to_tool_result(self) -> dict:
-        return {"isError": True, "content": [{"type": "text", "text": self.message}]}
 
 
 class ConfigError(BridgeError):

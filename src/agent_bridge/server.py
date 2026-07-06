@@ -45,16 +45,25 @@ def build_server(config: Config, registry: SessionRegistry) -> Server:
         return _load_tool_definitions()
 
     @server.call_tool()
-    async def _call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+    async def _call_tool(name: str, arguments: dict) -> types.CallToolResult:
         handler = dispatch.get(name)
         if handler is None:
-            error = {"isError": True, "content": [{"type": "text", "text": f"unknown tool '{name}'"}]}
-            return [types.TextContent(type="text", text=json.dumps(error))]
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=f"unknown tool '{name}'")],
+                isError=True,
+            )
         try:
             result = await handler(arguments, config=config, registry=registry)
         except BridgeError as e:
-            return [types.TextContent(type="text", text=json.dumps(e.to_tool_result()))]
-        return [types.TextContent(type="text", text=json.dumps(result, default=str))]
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=e.message)],
+                isError=True,
+            )
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=json.dumps(result, default=str))],
+            structuredContent=result,
+            isError=False,
+        )
 
     return server
 

@@ -59,3 +59,37 @@ warning ロジックのみ実装済み)。
 コスト面: 単純な "say ok" でも $0.087(cache creation 10,672 tokens 込み)。
 サブプロセスは対象リポジトリの CLAUDE.md 等をコンテキストに読み込むため、
 トリビアルなタスクでも無視できないコストが発生する点に注意。
+
+## 既知の不具合と修正: `list_repos` 等の tools/call が Desktop 側で無応答(2026-07-07)
+
+**症状**: Claude Desktop への MCP 登録・ハンドシェイク(`initialize`/`tools/list`)は成功するが、
+`list_repos` を呼ぶと Desktop 側で約4分後に「No result received」のタイムアウトになる。
+
+**切り分け**(いずれも正常と確認済み。詳細は git 履歴のコミットメッセージ参照):
+- `~/Library/Logs/Claude/mcp-server-agent-bridge.log` では `tools/call` 受信から
+  12ms で `result(1 blocks)` を返しており、agent-bridge プロセス自体は高速に応答していた。
+- `list_repos.handle()` は fcntl ロックや I/O を一切持たず、直接呼び出しでも 0.5ms で返る。
+- 上記から、agent-bridge の外(Desktop 側のレンダリング/上位ハンドリング層)で
+  結果が失われている可能性が濃厚と判断した。
+
+**根本原因**: `src/agent_bridge/server.py` の `_call_tool` が、成功時・エラー時ともに
+結果を `list[types.TextContent]`(テキスト1本に JSON を詰めた形)としてのみ返しており、
+MCP の `CallToolResult.structuredContent` を一度も設定していなかった。エラーも
+`isError` をテキスト内の JSON に埋め込むだけで、プロトコルレベルの
+`CallToolResult.isError` は常に `False`(未設定)のままだった。インストール済み
+`mcp` SDK(1.28.1、`pyproject.toml` は `mcp>=1.2.0` としか固定していなかった)は
+`structuredContent` を伴う応答を前提にした最近の MCP 仕様に沿っており、
+Desktop 側がこれに依存してハングしていたと推測される。
+
+**修正**: `_call_tool` が `types.CallToolResult` を直接返すように変更。
+成功時は `content`(従来通りの JSON テキスト、後方互換)に加えて
+`structuredContent=result`、`isError=False` を明示。エラー時(`BridgeError` /
+未知ツール)は `isError=True` をプロトコルレベルで設定するよう変更した
+(`errors.py` の `to_tool_result()` は不要になったため削除)。
+
+**検証**: `server.py` の `_call_tool`(MCP ハンドラそのもの)には従来テストが
+一切無かったため `tests/test_server.py` を新設し、成功時の `structuredContent`/
+`isError=False`、未知ツール・`BridgeError` 双方での `isError=True` を回帰テスト化。
+`uv run python -c` で `build_server(...)` 経由の実呼び出しを行い、
+`structuredContent` が正しく載ること・エラー系で `isError=True` になることを
+直接確認済み(pytest 49件全パス)。
