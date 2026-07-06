@@ -1,0 +1,19 @@
+{
+  "repos": {
+    "shibehasu-ops":   { "path": "~/dev/shibehasu-ops" },
+    "answer-prompter": { "path": "~/dev/answer-prompter" },
+    "solar-farmland":  { "path": "~/dev/solar-farmland", "sensitive": true }
+  },
+  "defaults": {
+    "backend": "claude",
+    "model": { "claude": "claude-sonnet-5", "cursor": "auto" }
+  },
+  "limits": {
+    "concurrency": 2,
+    "timeout_min": 30
+  },
+  "binaries": {
+    "claude": "claude",
+    "cursor": "agent"
+  }
+}

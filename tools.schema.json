@@ -1,0 +1,140 @@
+{
+  "$comment": "agent-bridge MCP tool definitions (v0.4 = v0.3 + 2026-07-06 addendum A0-A5). SPEC: SPEC.md. critique and orchestrate are v2/optional, not implemented in v0.",
+  "tools": [
+    {
+      "name": "list_repos",
+      "description": "利用可能なリポジトリのエイリアス一覧と既定バックエンド/モデルを返す",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "plan",
+      "description": "指定リポジトリで実装計画を立案させる。ファイルは変更しない。戻り値の計画をチャットで批評し、承認後に execute へ渡す。戻り値の計画は必ずユーザーに提示し、批評・議論を経てから次に進むこと。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": { "type": "string", "description": "計画してほしいタスクの記述(背景・制約含む)" },
+          "repo": { "type": "string", "description": "list_repos が返すエイリアス" },
+          "backend": { "type": "string", "enum": ["claude", "cursor"], "default": "claude", "description": "sensitive repo(config の sensitive:true)では backend=cursor は override 手段なしで常に拒否される(SPEC §5-8)。confirm_sensitive_model は model=claude-fable-5 のみを対象とし、backend=cursor の拒否は解除できない" },
+          "model": { "type": "string", "description": "claude-sonnet-5 / claude-fable-5 / opus など。省略時は config 既定" },
+          "session_id": { "type": "string", "description": "既存プランへの修正指示時に指定(resume)" },
+          "context": { "type": "string", "description": "チャット側での議論要約など追加文脈" },
+          "confirm_sensitive_model": { "type": "boolean", "default": false, "description": "sensitive repo で model=claude-fable-5 を使う場合専用の明示的な二重確認フラグ(model 指定だけでは不足)。backend=cursor の拒否には効かない — sensitive repo では cursor に override は存在しない" }
+        },
+        "required": ["task", "repo"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "execute",
+      "description": "承認済みの計画を実行する。呼び出し前に必ずユーザーの明示的な承認をチャットで得ること。ユーザーの明示的な承認発話(『OK』『実行して』等)を得るまで呼び出し禁止。実行後は必ず get_diff でレビューを提示すること。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": { "type": "string", "description": "plan が返した bridge_session_id" },
+          "approved": { "type": "boolean", "const": true, "description": "ユーザー承認済みの明示。true 以外は拒否" },
+          "instructions": { "type": "string", "description": "承認時の修正条件・注意点" },
+          "mode": { "type": "string", "enum": ["acceptEdits", "default"], "default": "acceptEdits" },
+          "use_worktree": { "type": "boolean", "default": true },
+          "timeout_min": { "type": "integer", "default": 30, "maximum": 120 }
+        },
+        "required": ["session_id", "approved"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_diff",
+      "description": "セッションの作業ツリー(worktree含む)の git diff と変更ファイル一覧を返す",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": { "type": "string" },
+          "stat_only": { "type": "boolean", "default": false }
+        },
+        "required": ["session_id"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "status",
+      "description": "セッション一覧または単一セッションの状態(running/done/failed、経過時間、累計コスト)を返す",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "session_id": { "type": "string" } },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "usage_report",
+      "$comment": "v0 (addendum A3).",
+      "description": "bridge 経由の推計コストとトークン使用量を集計して返す(JSONLログ由来)。チャット(claude.ai)側の使用量は含まれない点を応答に明記する。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "period": { "type": "string", "enum": ["today", "week", "month", "all"], "default": "week" },
+          "group_by": { "type": "string", "enum": ["model", "backend", "repo", "tool"], "default": "model" }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "critique",
+      "$comment": "v2 (案C用)。v0/v1 では実装しない。",
+      "description": "plan の成果物を独立インスタンスに批評させる(自動ループ用)。APPROVE/REVISE の構造化判定を強制。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": { "type": "string" },
+          "model": { "type": "string", "default": "claude-fable-5" },
+          "max_rounds_guard": { "type": "integer", "default": 3 }
+        },
+        "required": ["session_id"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "orchestrate",
+      "$comment": "v2 (案C)。v0/v1 では実装しない。定義は将来参照用。SPEC.md §11 A2 参照。",
+      "description": "計画立案(planner)と独立批評(critic)を自動でN往復させ、収束した最終計画とコスト内訳を返す。実行は行わない。返された計画はユーザーに提示し、承認後に execute を使うこと。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": { "type": "string" },
+          "repo": { "type": "string" },
+          "cost_cap_usd": { "type": "number", "description": "推計コストの上限。超過見込みで往復を中断し、途中経過を返す。必須", "minimum": 0.1, "maximum": 20 },
+          "max_rounds": { "type": "integer", "default": 3, "maximum": 5 },
+          "planner_backend": { "type": "string", "enum": ["claude", "cursor"], "default": "claude" },
+          "planner_model": { "type": "string", "default": "claude-sonnet-5" },
+          "critic_model": { "type": "string", "default": "claude-fable-5", "description": "批評役。低トークン工程なので高性能モデルを既定とする" },
+          "context": { "type": "string" }
+        },
+        "required": ["task", "repo", "cost_cap_usd"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "result_envelope": {
+    "$comment": "全ツール共通の応答外形(list_repos は簡易なので省略可)",
+    "type": "object",
+    "properties": {
+      "bridge_session_id": { "type": "string" },
+      "backend": { "type": "string", "enum": ["claude", "cursor"] },
+      "model": { "type": ["string", "null"] },
+      "usage": {
+        "type": ["object", "null"],
+        "description": "バックエンドJSONのusageをそのまま採録。取得不能なら null(推計しない)"
+      },
+      "cost_usd": { "type": ["number", "null"] },
+      "duration_s": { "type": "number" },
+      "warnings": { "type": "array", "items": { "type": "string" } },
+      "next_step_hint": {
+        "type": "string",
+        "description": "追補A1: チャット側モデルへの次アクション指示文(例: planは承認待ちを促す、executeはget_diffを促す)"
+      }
+    },
+    "required": ["bridge_session_id", "backend", "duration_s", "next_step_hint"]
+  }
+}
