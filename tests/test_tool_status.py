@@ -12,6 +12,8 @@ async def test_status_lists_all_sessions(fake_config):
 
     result = await status.handle({}, config=fake_config, registry=registry)
     assert len(result["sessions"]) == 2
+    assert "bridge_build" in result
+    assert "started_at" in result
 
 
 async def test_status_single_session_detail(fake_config):
@@ -23,6 +25,8 @@ async def test_status_single_session_detail(fake_config):
     )
     assert result["session"]["bridge_session_id"] == record.bridge_session_id
     assert result["elapsed_s"] >= 0
+    assert "bridge_build" in result
+    assert "started_at" in result
 
 
 async def test_status_unknown_session(fake_config):

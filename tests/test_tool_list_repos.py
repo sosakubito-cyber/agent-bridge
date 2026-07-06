@@ -8,3 +8,5 @@ async def test_list_repos_happy_path(fake_config):
     assert result["defaults"]["backend"] == "claude"
     sample = next(r for r in result["repos"] if r["alias"] == "sample")
     assert sample["default_backend"] == "claude"
+    assert "bridge_build" in result
+    assert "started_at" in result

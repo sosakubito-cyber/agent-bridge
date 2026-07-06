@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agent_bridge import buildinfo
 from agent_bridge.config import Config
 
 TOOL_NAME = "list_repos"
@@ -21,4 +22,6 @@ async def handle(arguments: dict, *, config: Config, registry=None) -> dict:
             "backend": config.default_backend,
             "model": config.default_models,
         },
+        "bridge_build": buildinfo.BRIDGE_BUILD,
+        "started_at": buildinfo.STARTED_AT,
     }

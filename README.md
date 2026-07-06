@@ -8,6 +8,14 @@ v0 scope: backend=`claude` only. Tools: `list_repos`, `plan`, `execute`, `get_di
 `status`, `usage_report`. See [SPEC.md](SPEC.md) for the full design and
 [tools.schema.json](tools.schema.json) for the machine-readable tool contract.
 
+## 運用注意
+
+MCPサーバーはDesktop起動時に立ち上がる常駐プロセスであり、コード変更はホットリロード
+されない。修正後は必ず Cmd+Q でDesktopを完全再起動すること。反映確認は `list_repos`
+の `bridge_build`(実行中プロセスが起動したコミットの短縮SHA、取得失敗時は `"unknown"`)
+と `started_at`(プロセス起動時刻)で行う — 期待するコミットと一致しなければ、
+再起動がまだ反映されていないか、別プロセスが動いている。
+
 ## 実測記録
 
 環境: `claude --version` → `2.1.201 (Claude Code)`(2026-07-07 時点)
