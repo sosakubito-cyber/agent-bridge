@@ -281,8 +281,17 @@ bridge 経由の推計コストとトークン使用量を集計して返す(JSO
 4. **承認ゲート**: `execute.approved === true` 必須。加えてサーバー側で
    「同一 session の plan 出力が存在すること」を検証(planなし実行の拒否)。
 5. **資源制限**: 同時実行 max 2(config)、timeout 既定30分、超過は SIGTERM→SIGKILL。
-6. **秘密情報**: 環境変数はサブプロセスに最小継承(PATH, HOME, 必要なもののみ)。
-   ログに stdin プロンプト全文は残すが、`ANTHROPIC_API_KEY` 等の値は残さない。
+6. **秘密情報**: 環境変数はサブプロセスに、**明示的なブロックリスト方式**で継承する
+   (2026-07-07 改訂。旧: PATH/HOME 等のみの allowlist)。`API_KEY`/`TOKEN`/`SECRET`/
+   `PASSWORD` を含む名前(`ANTHROPIC_API_KEY` 等。大小文字無視)の変数を親環境から
+   除外し、それ以外は継承する(`logging_writer.is_secret_env_name` と同じ判定を再利用)。
+   改訂理由: `claude` の OAuth/keychain 認証(`claude.ai` ログイン、Pro/Max サブスク等)は
+   macOS Keychain へのアクセスにログインセッションに近い環境を要求しており、
+   最小 allowlist(PATH/HOME 等のみ)ではこれが解決できず `Not logged in` で
+   失敗していた(実測確認済み。§10 参照)。Keychain 側が実際に何を要求するかは
+   認証情報の中身を調べずには完全には列挙できないため、allowlist の拡張ではなく
+   ブロックリストへの転換で対処した。ログに stdin プロンプト全文は残すが、
+   機微名の環境変数の値は残さない。
 7. **モデル既定**: `claude-fable-5` は**明示指定時のみ**。既定に置かない
    (7/8以降の無自覚クレジット消費防止 — settings.json 側の既定確認も運用手順に含める)。
 8. **sensitive repo 個別ガード**: config で `"sensitive": true` の repo は、

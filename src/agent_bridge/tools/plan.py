@@ -63,11 +63,12 @@ async def handle(arguments: dict, *, config: Config, registry: SessionRegistry) 
         result = run_claude(config.claude_binary, inv)
 
     new_backend_session_id = result.parsed.backend_session_id or session.backend_session_id
+    success = result.exit_code == 0
     session = registry.update(
         session.bridge_session_id,
-        phase="planned",
+        phase="planned" if success else "failed",
         backend_session_id=new_backend_session_id,
-        has_plan=True,
+        has_plan=success or session.has_plan,
         cost_usd_total=session.cost_usd_total + (result.parsed.cost_usd or 0.0),
     )
 

@@ -116,3 +116,9 @@ class SessionRegistry:
     def list_all(self) -> list[SessionRecord]:
         with self._locked() as data:
             return [SessionRecord.from_dict(v) for v in data.values()]
+
+    def delete(self, bridge_session_id: str) -> None:
+        with self._locked() as data:
+            if bridge_session_id not in data:
+                raise UnknownSessionError(f"unknown session_id '{bridge_session_id}'")
+            del data[bridge_session_id]

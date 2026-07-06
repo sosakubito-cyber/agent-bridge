@@ -11,18 +11,27 @@ import signal
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from subprocess import PIPE, Popen, TimeoutExpired
+from subprocess import DEVNULL, PIPE, Popen, TimeoutExpired
 from typing import Literal
 
 from agent_bridge import adapter
 from agent_bridge.errors import ClaudeBinaryNotFoundError
+from agent_bridge.logging_writer import is_secret_env_name
 
 GRACE_PERIOD_S = 10.0
 
-# claude needs its own auth/config state; if it reads other env vars (e.g. a
-# CLAUDE_CONFIG_DIR-style var), add here once confirmed empirically — this
-# constant is the single edit point (mirrors adapter.py's seam pattern).
-MINIMAL_ENV_ALLOWLIST = ("PATH", "HOME", "LANG", "LC_ALL", "TERM")
+# SPEC §5-6 originally allowlisted just PATH/HOME/LANG/LC_ALL/TERM for
+# subprocess env, on the theory that a minimal environment is safer. In
+# practice this broke claude's OAuth/keychain-based auth (the "claude.ai"
+# login method used by Pro/Max subscriptions): `claude auth status` reported
+# loggedIn:false even with HOME set, because macOS Keychain access needs
+# something closer to the caller's real login-session environment (USER was
+# the minimum needed to reproduce a fix, but Keychain's actual requirements
+# aren't fully enumerable without inspecting credential internals, which we
+# deliberately avoid). Switched to a BLOCKLIST: inherit the full parent
+# environment, but drop anything whose name looks like a secret — reusing
+# the same API_KEY/TOKEN/SECRET/PASSWORD heuristic logging_writer.py already
+# uses to decide what never gets logged (e.g. ANTHROPIC_API_KEY is dropped).
 
 
 @dataclass
@@ -47,7 +56,7 @@ class ClaudeRunResult:
 
 
 def build_env(passthrough: dict[str, str] | None = None) -> dict[str, str]:
-    env = {k: os.environ[k] for k in MINIMAL_ENV_ALLOWLIST if k in os.environ}
+    env = {k: v for k, v in os.environ.items() if not is_secret_env_name(k)}
     if passthrough:
         env.update(passthrough)
     return env
@@ -79,6 +88,9 @@ def run_claude(binary: str, inv: ClaudeInvocation) -> ClaudeRunResult:
             argv,
             cwd=inv.cwd,
             env=build_env(),
+            stdin=DEVNULL,  # never inherit agent-bridge's own stdin (the MCP stdio
+            # pipe to the chat client) — claude waits ~3s for piped stdin data
+            # otherwise, warns, and proceeds; the prompt is always passed via -p.
             stdout=PIPE,
             stderr=PIPE,
             text=True,

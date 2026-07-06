@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from agent_bridge.errors import ClaudeBinaryNotFoundError
-from agent_bridge.runner import ClaudeInvocation, build_argv, run_claude
+from agent_bridge.runner import ClaudeInvocation, build_argv, build_env, run_claude
 
 
 def _inv(**overrides):
@@ -42,6 +42,47 @@ def test_run_claude_happy_path(mock_claude_popen):
     assert result.exit_code == 0
     assert result.parsed.result_text == "ok"
     assert mock_claude_popen["last_kwargs"]["cwd"] == Path("/tmp")
+
+
+def test_build_env_passes_through_user_for_keychain_auth(monkeypatch):
+    """USER must reach claude for OAuth/keychain-based auth to resolve
+    (empirically confirmed 2026-07-07: `claude auth status` reports
+    loggedIn:false without it, even with HOME set)."""
+    monkeypatch.setenv("USER", "alice")
+    env = build_env()
+    assert env.get("USER") == "alice"
+
+
+def test_build_env_passes_through_arbitrary_non_secret_vars(monkeypatch):
+    """Blocklist approach (SPEC §5-6, revised 2026-07-07): inherit the full
+    parent environment except secret-shaped names — not just a fixed
+    allowlist — since Keychain-based auth's real requirements aren't fully
+    enumerable without inspecting credential internals."""
+    monkeypatch.setenv("SOME_HARMLESS_VAR", "hello")
+    env = build_env()
+    assert env.get("SOME_HARMLESS_VAR") == "hello"
+
+
+def test_build_env_strips_secret_shaped_names(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-should-not-leak")
+    monkeypatch.setenv("SOME_TOKEN", "also-should-not-leak")
+    monkeypatch.setenv("MY_SECRET", "nor-this")
+    monkeypatch.setenv("DB_PASSWORD", "nor-this-either")
+    env = build_env()
+    assert "ANTHROPIC_API_KEY" not in env
+    assert "SOME_TOKEN" not in env
+    assert "MY_SECRET" not in env
+    assert "DB_PASSWORD" not in env
+
+
+def test_run_claude_never_inherits_own_stdin(mock_claude_popen):
+    """agent-bridge's own stdin is the MCP stdio pipe to the chat client — if
+    inherited, claude waits ~3s for piped input, warns, and (per real-world
+    reproduction) can fail. The prompt is always passed via -p, so stdin must
+    be explicitly closed."""
+    mock_claude_popen["proc"].stdout_val = '{"result": "ok"}'
+    run_claude("claude", _inv())
+    assert mock_claude_popen["last_kwargs"]["stdin"] == subprocess.DEVNULL
 
 
 def test_run_claude_timeout_sends_sigterm_then_sigkill(monkeypatch, mock_claude_popen):

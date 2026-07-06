@@ -41,6 +41,21 @@ async def test_plan_nonzero_exit_raises_with_stderr(fake_config, mock_claude_pop
     assert "boom" in str(exc_info.value)
 
 
+async def test_plan_nonzero_exit_does_not_mark_has_plan(fake_config, mock_claude_popen):
+    """A failed claude invocation must not leave the registry saying a plan
+    exists (phase=planned/has_plan=True) when plan_markdown was never
+    produced — that mismatch is what orphaned b-20260706-07be/eaeb/0a1a."""
+    mock_claude_popen["proc"].returncode = 1
+    mock_claude_popen["proc"].stderr_val = "boom: something failed"
+    registry = SessionRegistry()
+    with pytest.raises(BridgeError):
+        await plan.handle({"task": "x", "repo": "sample"}, config=fake_config, registry=registry)
+    sessions = registry.list_all()
+    assert len(sessions) == 1
+    assert sessions[0].phase == "failed"
+    assert sessions[0].has_plan is False
+
+
 async def test_plan_json_parse_failure_does_not_crash(fake_config, mock_claude_popen):
     mock_claude_popen["proc"].stdout_val = "not valid json"
     mock_claude_popen["proc"].returncode = 0
