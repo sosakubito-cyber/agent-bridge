@@ -6,6 +6,7 @@ import pytest
 from agent_bridge.errors import ApprovalNotGrantedError, NoPlanArtifactError, BridgeError
 from agent_bridge.registry import SessionRegistry
 from agent_bridge.tools import execute
+from agent_bridge.worktree import create_worktree
 
 
 def _planned_session(registry, repo="sample", backend_session_id="sess-1"):
@@ -117,3 +118,23 @@ async def test_execute_without_worktree_uses_repo_path_directly(fake_config, moc
     assert mock_claude_popen["last_kwargs"]["cwd"] == sample_repo
     updated = registry.require(session.bridge_session_id)
     assert updated.worktree is None
+
+
+async def test_execute_reuses_plan_created_worktree(fake_config, mock_claude_popen, sample_repo):
+    """Regression: if plan() already created a worktree, execute() must resume
+    the backend session from that same cwd — not create a second worktree
+    (which would also crash: same branch name would already exist) and not
+    fall back to repo.path (which reintroduces the stale-permission-scope bug
+    this was built to fix)."""
+    registry = SessionRegistry()
+    session = _planned_session(registry)
+    pre_existing = create_worktree(sample_repo, session.bridge_session_id)
+    session = registry.update(session.bridge_session_id, worktree=str(pre_existing))
+
+    mock_claude_popen["proc"].stdout_val = json.dumps({"result": "done"})
+    await execute.handle(
+        {"session_id": session.bridge_session_id, "approved": True},
+        config=fake_config,
+        registry=registry,
+    )
+    assert mock_claude_popen["last_kwargs"]["cwd"] == pre_existing

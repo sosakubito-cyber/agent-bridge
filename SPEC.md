@@ -101,7 +101,8 @@ Claude Desktop (チャット: Sonnet 5 / Opus 4.8 / 要所で Fable 5)
       "model":   { "type": "string", "description": "例: claude-sonnet-5 / claude-fable-5 / opus。省略時は config の既定" },
       "session_id": { "type": "string", "description": "既存プランへの修正指示時に指定(resume)" },
       "context": { "type": "string", "description": "チャット側での議論の要約など、追加で渡す文脈" },
-      "confirm_sensitive_model": { "type": "boolean", "default": false, "description": "sensitive repo で model=claude-fable-5 を使う場合の明示的な二重確認フラグ(§5-8)。model 指定だけでは不足" }
+      "confirm_sensitive_model": { "type": "boolean", "default": false, "description": "sensitive repo で model=claude-fable-5 を使う場合の明示的な二重確認フラグ(§5-8)。model 指定だけでは不足" },
+      "use_worktree": { "type": "boolean", "default": true, "description": "git worktree を切って、その cwd で plan の claude セッションを開始する(既定true)。execute はこの同じ worktree を resume 時の cwd として引き継ぐ(2026-07-07 追加。理由は下記)" }
     },
     "required": ["task", "repo"],
     "additionalProperties": false
@@ -113,8 +114,18 @@ Claude Desktop (チャット: Sonnet 5 / Opus 4.8 / 要所で Fable 5)
 
 | backend | 実行コマンド(骨子) |
 |---|---|
-| claude | `claude -p "<task+context>" --permission-mode plan --model <model> --output-format json` (cwd=repo、resume時は `--resume <sid>`) |
+| claude | `claude -p "<task+context>" --permission-mode plan --model <model> --output-format json` (cwd=worktree、`use_worktree:false` 指定時のみ cwd=repo。resume時は `--resume <sid>`) |
 | cursor | `agent -p "<task+context>" --output-format json` (cwd=repo, `--force` なし=提案のみ。**v1 未実装**、v0では isError で拒否) |
+
+**worktree を plan の時点で作る理由(2026-07-07 判明・修正)**: 当初は plan が cwd=repo.path で
+claude セッションを開始し、execute だけが worktree を切って同じセッションを resume していた。
+claude のツール権限はセッションの作業ディレクトリにスコープされるため、resume 時に cwd が
+plan 時と食い違うと、resume された会話が(plan フェーズの記憶に基づき)元のリポジトリパスを
+参照した際にスコープ外と判定され、`Read` 等が黙って拒否される(例: 「README.md 読み取りの
+権限がまだ許可されていない」。OS のファイル権限とは無関係で、`claude` 内部の権限システムに
+よるもの。`permission_denials` フィールドで確認可能)。対策として plan の時点で worktree を
+作成し、以降 execute まで同じ cwd を使い続けるようにした。execute 側は `session.worktree` が
+既にあればそれを再利用し、`use_worktree` の値に関わらず新規作成はしない(§3.3 参照)。
 
 **出力**: `{ plan_markdown, bridge_session_id, backend_session_id, usage, cost_usd, warnings[], next_step_hint }`
 `next_step_hint` 固定文言: 「このプランをユーザーに提示し、『OK』『実行して』等の明示的な承認を得るまで execute を呼ばないこと」。
@@ -134,7 +145,7 @@ Claude Desktop (チャット: Sonnet 5 / Opus 4.8 / 要所で Fable 5)
       "instructions": { "type": "string", "description": "承認時の修正条件・注意点(チャットでの議論の反映)" },
       "mode": { "type": "string", "enum": ["acceptEdits", "default"], "default": "acceptEdits",
                 "description": "claude backend の --permission-mode。ヘッドレスでは対話承認不可のため acceptEdits を基本とする" },
-      "use_worktree": { "type": "boolean", "default": true, "description": "git worktree を切って隔離実行する" },
+      "use_worktree": { "type": "boolean", "default": true, "description": "plan が既に worktree を作成済みならそれを再利用する(この値に関わらず)。plan が worktree なしだった場合のみ、この値で新規作成するかを決める" },
       "timeout_min": { "type": "integer", "default": 30, "maximum": 120 }
     },
     "required": ["session_id", "approved"],

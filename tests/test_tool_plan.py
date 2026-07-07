@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -90,3 +91,43 @@ async def test_plan_rejects_cursor_backend(fake_config, mock_claude_popen):
             registry=registry,
         )
     assert mock_claude_popen["last_argv"] is None
+
+
+async def test_plan_creates_worktree_by_default_and_runs_there(fake_config, mock_claude_popen):
+    """Regression for the stale-permission-scope bug: plan() must create the
+    worktree and run claude's cwd inside it from the start, so execute()'s
+    --resume never crosses a directory-scope boundary."""
+    mock_claude_popen["proc"].stdout_val = json.dumps({"result": "# Plan", "session_id": "sess-wt"})
+    registry = SessionRegistry()
+    result = await plan.handle({"task": "x", "repo": "sample"}, config=fake_config, registry=registry)
+
+    session = registry.require(result["bridge_session_id"])
+    assert session.worktree is not None
+    assert mock_claude_popen["last_kwargs"]["cwd"] == Path(session.worktree)
+
+
+async def test_plan_without_worktree_uses_repo_path_directly(fake_config, mock_claude_popen, sample_repo):
+    mock_claude_popen["proc"].stdout_val = json.dumps({"result": "# Plan"})
+    registry = SessionRegistry()
+    result = await plan.handle(
+        {"task": "x", "repo": "sample", "use_worktree": False}, config=fake_config, registry=registry
+    )
+    assert mock_claude_popen["last_kwargs"]["cwd"] == sample_repo
+    assert registry.require(result["bridge_session_id"]).worktree is None
+
+
+async def test_plan_revision_reuses_existing_worktree(fake_config, mock_claude_popen):
+    mock_claude_popen["proc"].stdout_val = json.dumps({"result": "# v1", "session_id": "sess-wt2"})
+    registry = SessionRegistry()
+    first = await plan.handle({"task": "x", "repo": "sample"}, config=fake_config, registry=registry)
+    first_worktree = registry.require(first["bridge_session_id"]).worktree
+    assert first_worktree is not None
+
+    mock_claude_popen["proc"].stdout_val = json.dumps({"result": "# v2"})
+    second = await plan.handle(
+        {"task": "revise", "repo": "sample", "session_id": first["bridge_session_id"]},
+        config=fake_config,
+        registry=registry,
+    )
+    assert mock_claude_popen["last_kwargs"]["cwd"] == Path(first_worktree)
+    assert registry.require(second["bridge_session_id"]).worktree == first_worktree

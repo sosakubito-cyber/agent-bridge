@@ -22,7 +22,8 @@
           "model": { "type": "string", "description": "claude-sonnet-5 / claude-fable-5 / opus など。省略時は config 既定" },
           "session_id": { "type": "string", "description": "既存プランへの修正指示時に指定(resume)" },
           "context": { "type": "string", "description": "チャット側での議論要約など追加文脈" },
-          "confirm_sensitive_model": { "type": "boolean", "default": false, "description": "sensitive repo で model=claude-fable-5 を使う場合専用の明示的な二重確認フラグ(model 指定だけでは不足)。backend=cursor の拒否には効かない — sensitive repo では cursor に override は存在しない" }
+          "confirm_sensitive_model": { "type": "boolean", "default": false, "description": "sensitive repo で model=claude-fable-5 を使う場合専用の明示的な二重確認フラグ(model 指定だけでは不足)。backend=cursor の拒否には効かない — sensitive repo では cursor に override は存在しない" },
+          "use_worktree": { "type": "boolean", "default": true, "description": "git worktree を切って、その cwd で plan の claude セッションを開始する(既定true)。execute はこの同じ worktree を resume 時の cwd として引き継ぐため、claude のディレクトリスコープ型権限が食い違って読み取り拒否になる問題(2026-07-07 判明)を避けられる" }
         },
         "required": ["task", "repo"],
         "additionalProperties": false
@@ -38,7 +39,7 @@
           "approved": { "type": "boolean", "const": true, "description": "ユーザー承認済みの明示。true 以外は拒否" },
           "instructions": { "type": "string", "description": "承認時の修正条件・注意点" },
           "mode": { "type": "string", "enum": ["acceptEdits", "default"], "default": "acceptEdits" },
-          "use_worktree": { "type": "boolean", "default": true },
+          "use_worktree": { "type": "boolean", "default": true, "description": "plan が既に worktree を作成済みならそれを再利用する(この値に関わらず)。plan が worktree なしだった場合のみ、この値で新規作成するかを決める" },
           "timeout_min": { "type": "integer", "default": 30, "maximum": 120 }
         },
         "required": ["session_id", "approved"],

@@ -55,7 +55,14 @@ async def handle(arguments: dict, *, config: Config, registry: SessionRegistry) 
 
     repo = resolve_repo(config, session.repo)
 
-    if use_worktree:
+    # Reuse plan()'s worktree if it already made one — the backend session is
+    # being resumed, so its allowed-directory scope is already fixed to that
+    # cwd; switching cwd here would reintroduce the stale-path permission
+    # denial this was built to avoid. use_worktree only decides whether to
+    # create one now, for sessions plan() didn't already isolate.
+    if session.worktree:
+        cwd = Path(session.worktree)
+    elif use_worktree:
         cwd = create_worktree(repo.path, session.bridge_session_id)
         session = registry.update(session.bridge_session_id, worktree=str(cwd))
     else:
